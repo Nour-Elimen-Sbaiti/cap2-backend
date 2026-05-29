@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["gdal", "libexpat", "proj", "libgcc", "stdenv.cc.cc.lib"]
-
-[phases.install]
-cmds = ["pip install -r requirements.txt"]
-
-[start]
-cmd = "gunicorn envproject.wsgi --bind 0.0.0.0:$PORT"

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "buildAptPackages": ["gdal-bin", "libgdal-dev", "libexpat1-dev", "libproj-dev"],
+  "deploy": {
+    "aptPackages": ["gdal-bin", "libgdal-dev", "libexpat1-dev", "libproj-dev"]
+  }
+}
