@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Nabeul Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; }
+    #map { height: 60vh; width: 100%; }
+    #stats { padding: 20px; background: #f5f5f5; }
+    #stats h2 { margin-bottom: 10px; color: #333; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+    th { background: #333; color: white; padding: 8px 12px; text-align: left; }
+    td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+    tr:nth-child(even) { background: #eee; }
+    .positive { color: green; font-weight: bold; }
+    .negative { color: red; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="stats">
+    <h2>Loading stats...</h2>
+  </div>
+
+  <script>
+    // ── MAP ──
+    const map = L.map('map').setView([36.75, 10.73], 10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    const rasterOverlays = {};
+    const vectorOverlays = {};
+    const styles = {
+      'Nabeul Boundary': { color: '#FF0000', weight: 2, fillOpacity: 0 },
+      'Nabeul Hydrology': { color: '#0000FF', weight: 1.5, fillOpacity: 0.3, fillColor: '#4444FF' }
+    };
+
+    fetch('http://127.0.0.1:8000/api/rasters/')
+      .then(res => res.json())
+      .then(layers => {
+        layers.forEach(layer => {
+          rasterOverlays[layer.name] = L.tileLayer(layer.tile_url, {
+            opacity: 1.0,
+            attribution: layer.name
+          });
+        });
+        addControls();
+      });
+
+    fetch('http://127.0.0.1:8000/api/vectors/')
+      .then(res => res.json())
+      .then(layers => {
+        const promises = layers.map(layer =>
+          fetch(`http://127.0.0.1:8000/geojson/${layer.id}/`)
+            .then(res => res.json())
+            .then(geojson => {
+              const style = styles[layer.name] || { color: '#FF6600', weight: 2 };
+              vectorOverlays[layer.name] = L.geoJSON(geojson, { style });
+            })
+        );
+        Promise.all(promises).then(() => addControls());
+      });
+
+    let controlAdded = false;
+    function addControls() {
+      if (controlAdded) return;
+      if (Object.keys(rasterOverlays).length > 0 && Object.keys(vectorOverlays).length > 0) {
+        controlAdded = true;
+        if (vectorOverlays['Nabeul Boundary']) {
+          vectorOverlays['Nabeul Boundary'].addTo(map);
+        }
+        L.control.layers(null, { ...rasterOverlays, ...vectorOverlays }).addTo(map);
+      }
+    }
+
+    // ── STATS ──
+    fetch('http://127.0.0.1:8000/api/stats/')
+      .then(res => res.json())
+      .then(results => {
+        const statsDiv = document.getElementById('stats');
+        statsDiv.innerHTML = '';
+
+        results.forEach(result => {
+          const section = document.createElement('div');
+          section.style.marginBottom = '30px';
+
+          const title = document.createElement('h2');
+          title.textContent = result.name;
+          title.style.marginBottom = '10px';
+          section.appendChild(title);
+
+          // Change Detection table
+          if (result.result_type === 'change_detection') {
+            const table = document.createElement('table');
+            table.innerHTML = `
+              <tr>
+                <th>Class</th>
+                <th>Area 2020 (km²)</th>
+                <th>Area 2025 (km²)</th>
+                <th>Change (km²)</th>
+                <th>Change %</th>
+              </tr>
+              ${result.data.classes.map(c => `
+                <tr>
+                  <td>${c.class_name}</td>
+                  <td>${c.area_2020_km2}</td>
+                  <td>${c.area_2025_km2}</td>
+                  <td class="${c.change_km2 >= 0 ? 'positive' : 'negative'}">${c.change_km2}</td>
+                  <td class="${c.change_percent_of_2020 >= 0 ? 'positive' : 'negative'}">${c.change_percent_of_2020}%</td>
+                </tr>
+              `).join('')}
+            `;
+            section.appendChild(table);
+          }
+
+          // Overview Statistics table
+          if (result.result_type === 'overview_statistics') {
+            ['2020', '2025'].forEach(year => {
+              const yearTitle = document.createElement('h3');
+              yearTitle.textContent = `Year ${year}`;
+              yearTitle.style.margin = '10px 0';
+              section.appendChild(yearTitle);
+
+              const table = document.createElement('table');
+              table.innerHTML = `
+                <tr>
+                  <th>Class</th>
+                  <th>Area (km²)</th>
+                  <th>Area (ha)</th>
+                  <th>Percentage</th>
+                </tr>
+                ${result.data.years[year].classes.map(c => `
+                  <tr>
+                    <td>${c.class_name}</td>
+                    <td>${c.area_km2}</td>
+                    <td>${c.area_ha.toFixed(2)}</td>
+                    <td>${c.percentage}%</td>
+                  </tr>
+                `).join('')}
+              `;
+              section.appendChild(table);
+            });
+          }
+
+          // Transition Matrix table
+          if (result.result_type === 'transition_matrix') {
+            const classes = result.data.classes;
+            const matrix = result.data.matrix_km2;
+            const table = document.createElement('table');
+            table.innerHTML = `
+              <tr>
+                <th>From \\ To</th>
+                ${classes.map(c => `<th>${c}</th>`).join('')}
+              </tr>
+              ${matrix.map((row, i) => `
+                <tr>
+                  <th>${classes[i]}</th>
+                  ${row.map((val, j) => `
+                    <td style="${i === j ? 'background:#c8e6c9;font-weight:bold' : ''}">${val}</td>
+                  `).join('')}
+                </tr>
+              `).join('')}
+            `;
+            section.appendChild(table);
+          }
+
+          statsDiv.appendChild(section);
+        });
+      })
+      .catch(err => {
+        document.getElementById('stats').innerHTML = `<p style="color:red">Error loading stats: ${err.message}</p>`;
+      });
+  </script>
+</body>
+</html>
